@@ -4,13 +4,15 @@ plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidLibrary)
     alias(libs.plugins.ksp)
+    `maven-publish`
 }
 
 group = "pl.blizinski"
-version = "0.1.0-SNAPSHOT"
+version = "0.1.0"
 
 kotlin {
     androidTarget {
+        publishLibraryVariants("release")
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
