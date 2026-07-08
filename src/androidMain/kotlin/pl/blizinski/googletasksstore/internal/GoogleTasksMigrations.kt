@@ -152,6 +152,22 @@ val MIGRATION_5_6: Migration = object : Migration(5, 6) {
     }
 }
 
+/**
+ * No-op migration for installs that already hit the production incident described on
+ * [MIGRATION_5_6]: the destructive-fallback fix briefly shipped for that incident recreated
+ * this database at `version = 1` (the mistaken value `TaskSyncDatabase` originally declared,
+ * before it was corrected to 6) instead of the intended `version = 5/6` schema-preserving path.
+ * The table shapes it created at that moment are already identical to what version 6 expects —
+ * only the version *number* was wrong — so there is no data to move here; this migration exists
+ * solely so Room accepts the 1 -> 6 jump instead of treating it as another unmigrated downgrade
+ * requiring another destructive recreate.
+ */
+val MIGRATION_1_6: Migration = object : Migration(1, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Intentionally empty: version 1's tables already match version 6's shape.
+    }
+}
+
 private class ColumnLookup(private val cursor: Cursor) {
     operator fun invoke(name: String): Int = cursor.getColumnIndexOrThrow(name)
 }
