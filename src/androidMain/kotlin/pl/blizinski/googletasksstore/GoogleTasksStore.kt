@@ -13,6 +13,7 @@ import kotlinx.serialization.serializer
 import pl.blizinski.googletasksstore.internal.GoogleSyncErrorClassifier
 import pl.blizinski.googletasksstore.internal.GoogleTask
 import pl.blizinski.googletasksstore.internal.GoogleTaskList
+import pl.blizinski.googletasksstore.internal.MIGRATION_5_6
 import pl.blizinski.googletasksstore.internal.network.GoogleTasksNetworkSource
 import pl.blizinski.googletasksstore.internal.toPublic
 import pl.blizinski.googletasksstore.internal.toTask
@@ -67,7 +68,16 @@ class GoogleTasksStore(
         appContext,
         TaskSyncDatabase::class.java,
         config.dbName,
-    ).build()
+    )
+        // config.dbName is the same filename the old GoogleTasksDatabase (schema version 5)
+        // used before this store migrated onto the shared task-sync-kotlin engine
+        // (TaskSyncDatabase, version 6). MIGRATION_5_6 repacks the old named-column
+        // tasks/task_lists/pending_ops rows into the new synced_records/synced_lists/
+        // pending_ops shape, preserving every localId/remoteId — required so that
+        // TaskCompass's own comparisons and workspace-list-memberships (which reference
+        // these local IDs) keep working across the upgrade.
+        .addMigrations(MIGRATION_5_6)
+        .build()
 
     private val store = RoomLocalStore<GoogleTask, GoogleTaskList>(
         db.recordsDao(),
