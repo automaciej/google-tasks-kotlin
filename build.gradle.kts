@@ -28,7 +28,9 @@ kotlin {
             implementation(libs.google.api.client.android)
             implementation(libs.google.api.services.tasks)
             implementation(libs.work.runtime.ktx)
-            implementation("pl.blizinski:task-sync-kotlin:0.1.0-SNAPSHOT")
+            // Resolved via JitPack normally; substituted for the local checkout when one exists
+            // as a sibling directory — see settings.gradle.kts.
+            implementation("com.github.automaciej:task-sync-kotlin:v0.1.1")
         }
         androidUnitTest.dependencies {
             implementation(libs.kotlin.test)
