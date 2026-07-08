@@ -46,15 +46,6 @@ interface TaskStoreApi {
 
     suspend fun deleteTask(localId: String)
 
-    // --- Experimental ---
-
-    /**
-     * Moves each task in [localTaskIds] to the top of its list, in order, so
-     * that [localTaskIds[0]] ends up first, [localTaskIds[1]] second, etc.
-     * Tasks that have not yet been synced to the server (no remoteId) are skipped.
-     */
-    suspend fun pushOrder(localTaskIds: List<String>)
-
     // --- Lifecycle ---
 
     /** Runs a full sync cycle synchronously (flush pending ops, then pull). */

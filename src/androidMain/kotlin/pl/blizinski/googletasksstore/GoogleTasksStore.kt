@@ -7,26 +7,33 @@ import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccoun
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import org.json.JSONObject
-import pl.blizinski.googletasksstore.internal.LocalTasksStore
-import pl.blizinski.googletasksstore.internal.RoomLocalTasksStore
-import pl.blizinski.googletasksstore.internal.db.GoogleTasksDatabase
-import pl.blizinski.googletasksstore.internal.db.OpType
-import pl.blizinski.googletasksstore.internal.db.PendingOpEntity
-import pl.blizinski.googletasksstore.internal.db.TaskEntity
-import pl.blizinski.googletasksstore.internal.db.TaskListEntity
+import kotlinx.serialization.serializer
+import pl.blizinski.googletasksstore.internal.GoogleSyncErrorClassifier
+import pl.blizinski.googletasksstore.internal.GoogleTask
+import pl.blizinski.googletasksstore.internal.GoogleTaskList
 import pl.blizinski.googletasksstore.internal.network.GoogleTasksNetworkSource
-import pl.blizinski.googletasksstore.internal.sync.AdaptivePoller
-import pl.blizinski.googletasksstore.internal.sync.OrderPusher
-import pl.blizinski.googletasksstore.internal.sync.PendingOpsProcessor
-import pl.blizinski.googletasksstore.internal.sync.SyncEngine
-import pl.blizinski.googletasksstore.internal.sync.SyncWorkerDependencies
+import pl.blizinski.googletasksstore.internal.toPublic
+import pl.blizinski.googletasksstore.internal.toTask
+import pl.blizinski.googletasksstore.internal.toTaskList
 import pl.blizinski.googletasksstore.models.SyncStatus
 import pl.blizinski.googletasksstore.models.Task
 import pl.blizinski.googletasksstore.models.TaskList
+import pl.blizinski.tasksync.AdaptivePoller
+import pl.blizinski.tasksync.OpType
+import pl.blizinski.tasksync.PendingOp
+import pl.blizinski.tasksync.PendingOpsProcessor
+import pl.blizinski.tasksync.RoomLocalStore
+import pl.blizinski.tasksync.SyncConfig
+import pl.blizinski.tasksync.SyncEngine
+import pl.blizinski.tasksync.SyncWorkerDependencies
+import pl.blizinski.tasksync.SyncedListRecord
+import pl.blizinski.tasksync.SyncedRecord
+import pl.blizinski.tasksync.db.TaskSyncDatabase
 import java.io.Closeable
 import java.util.UUID
+import kotlinx.serialization.json.Json
 
 /**
  * Local-first store for Google Tasks. Reads always come from the Room cache;
@@ -54,33 +61,35 @@ class GoogleTasksStore(
 ) : TaskStoreApi, Closeable {
 
     private val appContext = context.applicationContext
+    private val json = Json { ignoreUnknownKeys = true }
 
-    private val db: GoogleTasksDatabase = Room.databaseBuilder(
+    private val db: TaskSyncDatabase = Room.databaseBuilder(
         appContext,
-        GoogleTasksDatabase::class.java,
+        TaskSyncDatabase::class.java,
         config.dbName,
-    )
-        .addMigrations(GoogleTasksDatabase.MIGRATION_1_2, GoogleTasksDatabase.MIGRATION_2_3, GoogleTasksDatabase.MIGRATION_3_4, GoogleTasksDatabase.MIGRATION_4_5)
-        .build()
+    ).build()
 
-    private val store: LocalTasksStore = RoomLocalTasksStore(
-        db.tasksDao(),
-        db.taskListsDao(),
+    private val store = RoomLocalStore<GoogleTask, GoogleTaskList>(
+        db.recordsDao(),
+        db.listsDao(),
         db.pendingOpsDao(),
+        serializer(),
+        serializer(),
     )
 
     private val network = GoogleTasksNetworkSource(credential)
-    private val pendingOpsProcessor = PendingOpsProcessor(store, network)
-    private val syncEngine = SyncEngine(store, network, pendingOpsProcessor)
-    private val orderPusher = OrderPusher(store, network)
+    private val errorClassifier = GoogleSyncErrorClassifier()
+    private val pendingOpsProcessor = PendingOpsProcessor(store, network, serializer<GoogleTask>(), errorClassifier)
+    private val syncEngine = SyncEngine(store, network, pendingOpsProcessor, errorClassifier)
 
+    private val syncConfig = SyncConfig(config.minPollInterval, config.maxPollInterval)
     private val workManager = WorkManager.getInstance(appContext)
-    private val poller = AdaptivePoller(workManager, config)
+    private val poller = AdaptivePoller(workManager, syncConfig)
 
     private val _syncStatus = MutableStateFlow(SyncStatus())
 
     init {
-        SyncWorkerDependencies.current = SyncWorkerDependencies.Deps(syncEngine, config)
+        SyncWorkerDependencies.current = SyncWorkerDependencies.Deps(syncEngine, syncConfig)
         poller.start()
     }
 
@@ -88,10 +97,11 @@ class GoogleTasksStore(
     // Public read API
     // -----------------------------------------------------------------------
 
-    override fun taskLists(): Flow<List<TaskList>> = store.taskLists()
+    override fun taskLists(): Flow<List<TaskList>> = store.lists().map { lists -> lists.map { it.toTaskList() } }
 
     /** [listLocalId] is the [TaskList.id] value returned by [taskLists]. */
-    override fun tasks(listLocalId: String): Flow<List<Task>> = store.tasks(listLocalId)
+    override fun tasks(listLocalId: String): Flow<List<Task>> =
+        store.records(listLocalId).map { records -> records.map { it.toTask() } }
 
     /**
      * Live sync status: [SyncStatus.pendingOpCount] is always current (sourced
@@ -111,72 +121,51 @@ class GoogleTasksStore(
     override suspend fun createList(title: String): String {
         val localId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
-        store.upsertTaskList(
-            TaskListEntity(
+        store.upsertList(
+            SyncedListRecord(
                 localId = localId,
                 remoteId = null,
-                title = title,
+                content = GoogleTaskList(title = title),
                 lastSyncedAt = null,
-                position = Int.MAX_VALUE,  // corrected to real position on next sync
+                position = Int.MAX_VALUE, // corrected to real position on next sync
             )
         )
         store.enqueuePendingOp(
-            PendingOpEntity(
-                id = UUID.randomUUID().toString(),
-                type = OpType.CREATE_LIST,
-                entityLocalId = localId,
-                listLocalId = localId,
-                payloadJson = "",
-                createdAt = now,
-            )
+            PendingOp(id = UUID.randomUUID().toString(), type = OpType.CREATE_LIST, entityLocalId = localId, listLocalId = localId, createdAt = now)
         )
         poller.onLocalWrite()
         return localId
     }
 
     override suspend fun updateList(localId: String, title: String) {
-        val entity = store.getTaskListByLocalId(localId) ?: return
+        val entity = store.getListByLocalId(localId) ?: return
         val now = System.currentTimeMillis()
-        store.upsertTaskList(entity.copy(title = title))
+        store.upsertList(entity.copy(content = GoogleTaskList(title = title)))
         store.enqueuePendingOp(
-            PendingOpEntity(
-                id = UUID.randomUUID().toString(),
-                type = OpType.UPDATE_LIST,
-                entityLocalId = localId,
-                listLocalId = localId,
-                payloadJson = "",
-                createdAt = now,
-            )
+            PendingOp(id = UUID.randomUUID().toString(), type = OpType.UPDATE_LIST, entityLocalId = localId, listLocalId = localId, createdAt = now)
         )
         poller.onLocalWrite()
     }
 
     override suspend fun deleteList(localId: String) {
-        val entity = store.getTaskListByLocalId(localId) ?: return
+        val entity = store.getListByLocalId(localId) ?: return
         val now = System.currentTimeMillis()
         // Cancel pending ops for all tasks in this list; remove locally-created tasks immediately.
-        for (task in store.getAllTaskEntitiesForList(localId)) {
+        for (task in store.getAllRecordsForList(localId)) {
             store.removeAllPendingOpsForEntity(task.localId)
-            if (task.remoteId == null) store.hardDeleteTask(task.localId)
+            if (task.remoteId == null) store.hardDeleteRecord(task.localId)
         }
         // Soft-delete the list so it disappears from the UI immediately.
-        store.upsertTaskList(entity.copy(isDeleted = true))
+        store.upsertList(entity.copy(isDeleted = true))
         if (entity.remoteId != null) {
-            // Save remoteId in payloadJson — entity may be modified/cleaned before sync runs.
+            // Save remoteId in contentJson — entity may be modified/cleaned before sync runs.
             store.enqueuePendingOp(
-                PendingOpEntity(
-                    id = UUID.randomUUID().toString(),
-                    type = OpType.DELETE_LIST,
-                    entityLocalId = localId,
-                    listLocalId = localId,
-                    payloadJson = entity.remoteId,
-                    createdAt = now,
-                )
+                PendingOp(id = UUID.randomUUID().toString(), type = OpType.DELETE_LIST, entityLocalId = localId, listLocalId = localId, contentJson = entity.remoteId, createdAt = now)
             )
             poller.onLocalWrite()
         } else {
             // Never synced — clean up locally without touching the server.
-            store.hardDeleteTaskList(localId)
+            store.hardDeleteList(localId)
         }
     }
 
@@ -187,27 +176,14 @@ class GoogleTasksStore(
     override suspend fun createTask(listLocalId: String, title: String, notes: String?, dueDate: Long?): String {
         val localId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
-        store.upsertTask(
-            TaskEntity(
-                localId = localId,
-                remoteId = null,
-                listLocalId = listLocalId,
-                title = title,
-                notes = notes,
-                isCompleted = false,
-                createdDate = now,
-                dueDate = dueDate,
-                lastSyncedAt = null,
-            )
+        val content = GoogleTask(title = title, notes = notes, createdDate = now, dueDate = dueDate)
+        store.upsertRecord(
+            SyncedRecord(localId = localId, remoteId = null, listLocalId = listLocalId, content = content, isCompleted = false, lastSyncedAt = null)
         )
         store.enqueuePendingOp(
-            PendingOpEntity(
-                id = UUID.randomUUID().toString(),
-                type = OpType.CREATE_TASK,
-                entityLocalId = localId,
-                listLocalId = listLocalId,
-                payloadJson = taskPayloadJson(title, notes, dueDate),
-                createdAt = now,
+            PendingOp(
+                id = UUID.randomUUID().toString(), type = OpType.CREATE_RECORD, entityLocalId = localId, listLocalId = listLocalId,
+                contentJson = json.encodeToString(serializer(), content), createdAt = now,
             )
         )
         poller.onLocalWrite()
@@ -216,75 +192,48 @@ class GoogleTasksStore(
 
     /** Updates [title], [notes], and [dueDate]. Pass null to clear that field. */
     override suspend fun updateTask(localId: String, title: String, notes: String?, dueDate: Long?) {
-        val entity = store.getTaskByLocalId(localId) ?: return
+        val entity = store.getRecordByLocalId(localId) ?: return
         val now = System.currentTimeMillis()
-        store.upsertTask(entity.copy(title = title, notes = notes, dueDate = dueDate))
+        val newContent = entity.content.copy(title = title, notes = notes, dueDate = dueDate)
+        store.upsertRecord(entity.copy(content = newContent))
         store.enqueuePendingOp(
-            PendingOpEntity(
-                id = UUID.randomUUID().toString(),
-                type = OpType.UPDATE_TASK,
-                entityLocalId = localId,
-                listLocalId = entity.listLocalId,
-                payloadJson = taskPayloadJson(title, notes, dueDate),
-                createdAt = now,
+            PendingOp(
+                id = UUID.randomUUID().toString(), type = OpType.UPDATE_RECORD, entityLocalId = localId, listLocalId = entity.listLocalId,
+                contentJson = json.encodeToString(serializer(), newContent), createdAt = now,
             )
         )
         poller.onLocalWrite()
     }
 
     override suspend fun completeTask(localId: String) {
-        val entity = store.getTaskByLocalId(localId) ?: return
+        val entity = store.getRecordByLocalId(localId) ?: return
         val now = System.currentTimeMillis()
-        store.upsertTask(entity.copy(isCompleted = true, completedDate = now))
+        store.upsertRecord(entity.copy(isCompleted = true, content = entity.content.copy(completedDate = now)))
         store.enqueuePendingOp(
-            PendingOpEntity(
-                id = UUID.randomUUID().toString(),
-                type = OpType.COMPLETE_TASK,
-                entityLocalId = localId,
-                listLocalId = entity.listLocalId,
-                payloadJson = "",
-                createdAt = now,
-            )
+            PendingOp(id = UUID.randomUUID().toString(), type = OpType.COMPLETE_RECORD, entityLocalId = localId, listLocalId = entity.listLocalId, createdAt = now)
         )
         poller.onLocalWrite()
     }
 
     override suspend fun uncompleteTask(localId: String) {
-        val entity = store.getTaskByLocalId(localId) ?: return
+        val entity = store.getRecordByLocalId(localId) ?: return
         val now = System.currentTimeMillis()
-        store.upsertTask(entity.copy(isCompleted = false, completedDate = null))
+        store.upsertRecord(entity.copy(isCompleted = false, content = entity.content.copy(completedDate = null)))
         store.enqueuePendingOp(
-            PendingOpEntity(
-                id = UUID.randomUUID().toString(),
-                type = OpType.UPDATE_TASK,
-                entityLocalId = localId,
-                listLocalId = entity.listLocalId,
-                payloadJson = taskPayloadJson(entity.title, entity.notes, entity.dueDate, isCompleted = false),
-                createdAt = now,
-            )
+            PendingOp(id = UUID.randomUUID().toString(), type = OpType.UNCOMPLETE_RECORD, entityLocalId = localId, listLocalId = entity.listLocalId, createdAt = now)
         )
         poller.onLocalWrite()
     }
 
     override suspend fun deleteTask(localId: String) {
-        val entity = store.getTaskByLocalId(localId) ?: return
+        val entity = store.getRecordByLocalId(localId) ?: return
         val now = System.currentTimeMillis()
-        store.softDeleteTask(localId)
+        store.softDeleteRecord(localId)
         store.enqueuePendingOp(
-            PendingOpEntity(
-                id = UUID.randomUUID().toString(),
-                type = OpType.DELETE_TASK,
-                entityLocalId = localId,
-                listLocalId = entity.listLocalId,
-                payloadJson = "",
-                createdAt = now,
-            )
+            PendingOp(id = UUID.randomUUID().toString(), type = OpType.DELETE_RECORD, entityLocalId = localId, listLocalId = entity.listLocalId, createdAt = now)
         )
         poller.onLocalWrite()
     }
-
-    override suspend fun pushOrder(localTaskIds: List<String>) =
-        orderPusher.push(localTaskIds)
 
     /**
      * Runs a full sync cycle synchronously (flush pending ops, then pull).
@@ -295,14 +244,15 @@ class GoogleTasksStore(
         val result = syncEngine.sync()
         val now = System.currentTimeMillis()
         _syncStatus.update { current ->
-            val allErrors = result.errors + current.recentErrors
+            val mappedErrors = result.errors.map { it.toPublic() }
+            val allErrors = mappedErrors + current.recentErrors
             current.copy(
                 isSyncing = false,
                 lastSyncedAt = now,
                 // Clear accumulated errors when the new sync is clean; otherwise accumulate.
-                recentErrors = if (result.errors.isEmpty()) emptyList()
+                recentErrors = if (mappedErrors.isEmpty()) emptyList()
                                else allErrors.take(config.maxRecentErrors),
-                consentIntent = result.consentIntent,
+                consentIntent = result.consentIntent as? android.content.Intent,
             )
         }
     }
@@ -318,33 +268,3 @@ class GoogleTasksStore(
         SyncWorkerDependencies.current = null
     }
 }
-
-// ---------------------------------------------------------------------------
-// Payload helpers
-// ---------------------------------------------------------------------------
-
-private fun taskPayloadJson(title: String, notes: String?, dueDate: Long? = null, isCompleted: Boolean? = null): String =
-    JSONObject().apply {
-        put("title", title)
-        put("notes", notes ?: JSONObject.NULL)
-        put("dueDate", dueDate ?: JSONObject.NULL)
-        if (isCompleted != null) put("isCompleted", isCompleted)
-    }.toString()
-
-// ---------------------------------------------------------------------------
-// RFC 3339 helpers for due date (Google Tasks API format)
-// ---------------------------------------------------------------------------
-
-/** Converts epoch milliseconds to an RFC 3339 date string ("2026-03-20T00:00:00.000Z"). */
-internal fun Long.toRfc3339DueDate(): String {
-    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
-    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-    return sdf.format(java.util.Date(this))
-}
-
-/** Parses an RFC 3339 date string to epoch milliseconds, or null on failure. */
-internal fun String.parseRfc3339ToEpochMs(): Long? = try {
-    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
-    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-    sdf.parse(this)?.time
-} catch (e: Exception) { null }

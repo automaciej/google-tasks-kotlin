@@ -1,27 +1,27 @@
 package pl.blizinski.googletasksstore.internal
 
 import org.json.JSONArray
-import pl.blizinski.googletasksstore.internal.db.TaskEntity
-import pl.blizinski.googletasksstore.internal.db.TaskListEntity
 import pl.blizinski.googletasksstore.models.Task
 import pl.blizinski.googletasksstore.models.TaskId
 import pl.blizinski.googletasksstore.models.TaskLink
 import pl.blizinski.googletasksstore.models.TaskList
+import pl.blizinski.tasksync.SyncedListRecord
+import pl.blizinski.tasksync.SyncedRecord
 
-internal fun TaskEntity.toTask(): Task = Task(
+internal fun SyncedRecord<GoogleTask>.toTask(): Task = Task(
     id = TaskId(localId = localId, remoteId = remoteId),
     listId = listLocalId,
-    title = title,
-    notes = notes,
+    title = content.title,
+    notes = content.notes,
     isCompleted = isCompleted,
-    createdDate = createdDate,
-    dueDate = dueDate,
-    isSubtask = parentId != null,
-    position = position,
-    completedDate = completedDate,
-    isHidden = isHidden,
-    webViewLink = webViewLink,
-    links = linksJson.toTaskLinks(),
+    createdDate = content.createdDate,
+    dueDate = content.dueDate,
+    isSubtask = content.parentId != null,
+    position = content.position,
+    completedDate = content.completedDate,
+    isHidden = content.isHidden,
+    webViewLink = content.webViewLink,
+    links = content.linksJson.toTaskLinks(),
 )
 
 private fun String?.toTaskLinks(): List<TaskLink> {
@@ -37,7 +37,7 @@ private fun String?.toTaskLinks(): List<TaskLink> {
     }
 }
 
-internal fun TaskListEntity.toTaskList(): TaskList = TaskList(
+internal fun SyncedListRecord<GoogleTaskList>.toTaskList(): TaskList = TaskList(
     id = localId,
-    title = title,
+    title = content.title,
 )

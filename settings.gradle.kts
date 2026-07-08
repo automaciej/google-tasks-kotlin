@@ -29,3 +29,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
+
+includeBuild("../task-sync-kotlin")

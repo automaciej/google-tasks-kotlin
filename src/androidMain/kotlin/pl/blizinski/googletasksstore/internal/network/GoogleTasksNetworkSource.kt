@@ -11,9 +11,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import pl.blizinski.googletasksstore.parseRfc3339ToEpochMs
+import pl.blizinski.googletasksstore.internal.GoogleTask
+import pl.blizinski.googletasksstore.internal.GoogleTaskList
+import pl.blizinski.tasksync.NetworkSource
+import pl.blizinski.tasksync.RemoteListRecord
+import pl.blizinski.tasksync.RemoteRecord
 
-internal class GoogleTasksNetworkSource(credential: GoogleAccountCredential) : NetworkTasksSource {
+/**
+ * The only place in this library that knows [GoogleTask]/[GoogleTaskList]'s shape and Google
+ * Tasks' own RFC 3339 date format — [pl.blizinski.tasksync.SyncEngine]/
+ * [pl.blizinski.tasksync.PendingOpsProcessor] never see either.
+ */
+internal class GoogleTasksNetworkSource(
+    credential: GoogleAccountCredential,
+) : NetworkSource<GoogleTask, GoogleTaskList> {
 
     private val client: Tasks = Tasks.Builder(
         NetHttpTransport(),
@@ -23,40 +34,42 @@ internal class GoogleTasksNetworkSource(credential: GoogleAccountCredential) : N
         .setApplicationName("GoogleTasksStore")
         .build()
 
-    override suspend fun createTaskList(title: String): RemoteTaskList = withContext(Dispatchers.IO) {
-        val result = client.tasklists().insert(GoogleApiTaskList().apply { this.title = title }).execute()
-        RemoteTaskList(remoteId = result.id, title = result.title ?: "")
-    }
-
-    override suspend fun updateTaskList(remoteListId: String, title: String): Unit = withContext(Dispatchers.IO) {
-        client.tasklists().patch(remoteListId, GoogleApiTaskList().apply { this.title = title }).execute()
-    }
-
-    override suspend fun deleteTaskList(remoteListId: String): Unit = withContext(Dispatchers.IO) {
-        client.tasklists().delete(remoteListId).execute()
-    }
-
-    override suspend fun getTaskLists(): List<RemoteTaskList> = withContext(Dispatchers.IO) {
+    override suspend fun getLists(): List<RemoteListRecord<GoogleTaskList>> = withContext(Dispatchers.IO) {
         client.tasklists().list()
             .execute()
             .items
             .orEmpty()
-            .map { RemoteTaskList(remoteId = it.id, title = it.title ?: "") }
+            .map { RemoteListRecord(remoteId = it.id, content = GoogleTaskList(title = it.title ?: "")) }
     }
 
-    override suspend fun getTasks(remoteListId: String, updatedMin: String?): List<RemoteTask> =
+    override suspend fun createList(content: GoogleTaskList): RemoteListRecord<GoogleTaskList> =
         withContext(Dispatchers.IO) {
-            val result = mutableListOf<RemoteTask>()
+            val result = client.tasklists().insert(GoogleApiTaskList().apply { title = content.title }).execute()
+            RemoteListRecord(remoteId = result.id, content = GoogleTaskList(title = result.title ?: ""))
+        }
+
+    override suspend fun updateList(remoteListId: String, content: GoogleTaskList): Unit =
+        withContext(Dispatchers.IO) {
+            client.tasklists().patch(remoteListId, GoogleApiTaskList().apply { title = content.title }).execute()
+        }
+
+    override suspend fun deleteList(remoteListId: String): Unit = withContext(Dispatchers.IO) {
+        client.tasklists().delete(remoteListId).execute()
+    }
+
+    override suspend fun getRecords(remoteListId: String, updatedMin: Long?): List<RemoteRecord<GoogleTask>> =
+        withContext(Dispatchers.IO) {
+            val result = mutableListOf<RemoteRecord<GoogleTask>>()
             var pageToken: String? = null
             do {
                 val request = client.tasks().list(remoteListId)
                     .setMaxResults(100)
                     .apply { if (pageToken != null) setPageToken(pageToken) }
                 if (updatedMin != null) {
-                    // Incremental: fetch everything changed since updatedMin,
-                    // including completed and deleted tasks.
+                    // Incremental: fetch everything changed since updatedMin, including
+                    // completed and deleted tasks.
                     request
-                        .setUpdatedMin(updatedMin)
+                        .setUpdatedMin(updatedMin.toRfc3339DueDate())
                         .setShowCompleted(true)
                         .setShowDeleted(true)
                         .setShowHidden(true)
@@ -68,118 +81,119 @@ internal class GoogleTasksNetworkSource(credential: GoogleAccountCredential) : N
                         .setShowHidden(false)
                 }
                 val response = request.execute()
-                result += response.items.orEmpty().map { it.toRemoteTask(remoteListId) }
+                result += response.items.orEmpty().map { it.toRemoteRecord() }
                 pageToken = response.nextPageToken
             } while (pageToken != null)
             result
         }
 
-    override suspend fun createTask(
-        remoteListId: String,
-        title: String,
-        notes: String?,
-        dueDate: String?,
-    ): RemoteTask = withContext(Dispatchers.IO) {
-        val body = Task().apply {
-            this.title = title
-            this.notes = notes
-            this.due = dueDate
-        }
-        client.tasks().insert(remoteListId, body).execute().toRemoteTask(remoteListId)
-    }
-
-    override suspend fun updateTask(
-        remoteListId: String,
-        remoteTaskId: String,
-        title: String,
-        notes: String?,
-        dueDate: String?,
-        isCompleted: Boolean?,
-    ): Unit = withContext(Dispatchers.IO) {
-        val patch = Task().apply {
-            this.title = title
-            // GsonFactory omits null fields from PATCH JSON, so the server would
-            // ignore them and leave the old value. Data.NULL_STRING is serialized
-            // as JSON null, which explicitly clears the field server-side.
-            this.notes = notes ?: Data.NULL_STRING
-            this.due = dueDate ?: Data.NULL_STRING
-            if (isCompleted == false) {
-                // Revert to needsAction: set status and omit the completed timestamp.
-                this.status = "needsAction"
-                this.completed = Data.NULL_STRING
+    override suspend fun createRecord(remoteListId: String, content: GoogleTask): RemoteRecord<GoogleTask> =
+        withContext(Dispatchers.IO) {
+            val body = Task().apply {
+                title = content.title
+                notes = content.notes
+                due = content.dueDate?.toRfc3339DueDate()
             }
+            client.tasks().insert(remoteListId, body).execute().toRemoteRecord()
         }
-        client.tasks().patch(remoteListId, remoteTaskId, patch).execute()
-    }
 
-    override suspend fun completeTask(
-        remoteListId: String,
-        remoteTaskId: String,
-    ): Unit = withContext(Dispatchers.IO) {
-        val patch = Task().apply { status = "completed" }
-        client.tasks().patch(remoteListId, remoteTaskId, patch).execute()
-    }
+    override suspend fun updateRecord(remoteListId: String, remoteId: String, content: GoogleTask): Unit =
+        withContext(Dispatchers.IO) {
+            val patch = Task().apply {
+                title = content.title
+                // GsonFactory omits null fields from PATCH JSON, so the server would ignore
+                // them and leave the old value. Data.NULL_STRING is serialized as JSON null,
+                // which explicitly clears the field server-side.
+                notes = content.notes ?: Data.NULL_STRING
+                due = content.dueDate?.toRfc3339DueDate() ?: Data.NULL_STRING
+            }
+            client.tasks().patch(remoteListId, remoteId, patch).execute()
+        }
 
-    override suspend fun deleteTask(
-        remoteListId: String,
-        remoteTaskId: String,
-    ): Unit = withContext(Dispatchers.IO) {
-        client.tasks().delete(remoteListId, remoteTaskId).execute()
-    }
+    override suspend fun completeRecord(remoteListId: String, remoteId: String): Unit =
+        withContext(Dispatchers.IO) {
+            val patch = Task().apply { status = "completed" }
+            client.tasks().patch(remoteListId, remoteId, patch).execute()
+        }
 
-    override suspend fun moveTask(
-        remoteListId: String,
-        remoteTaskId: String,
-        previousRemoteTaskId: String?,
-    ): Unit = withContext(Dispatchers.IO) {
-        client.tasks().move(remoteListId, remoteTaskId)
-            .apply { if (previousRemoteTaskId != null) setPrevious(previousRemoteTaskId) }
-            .execute()
-    }
+    override suspend fun uncompleteRecord(remoteListId: String, remoteId: String): Unit =
+        withContext(Dispatchers.IO) {
+            // Google Tasks has no dedicated "uncomplete" endpoint — revert via patch: set
+            // status back to needsAction and clear the completed timestamp.
+            val patch = Task().apply {
+                status = "needsAction"
+                completed = Data.NULL_STRING
+            }
+            client.tasks().patch(remoteListId, remoteId, patch).execute()
+        }
+
+    override suspend fun deleteRecord(remoteListId: String, remoteId: String): Unit =
+        withContext(Dispatchers.IO) {
+            client.tasks().delete(remoteListId, remoteId).execute()
+        }
 }
 
-private fun Task.toRemoteTask(remoteListId: String) = RemoteTask(
+private fun Task.toRemoteRecord(): RemoteRecord<GoogleTask> = RemoteRecord(
     remoteId = id,
-    remoteListId = remoteListId,
-    title = title ?: "",
-    notes = notes,
     isCompleted = "completed" == status,
     isDeleted = deleted == true,
-    isHidden = hidden == true,
-    createdDate = null, // Google Tasks API does not expose creation date
     remoteUpdatedAt = updated?.parseRfc3339ToEpochMs(),
-    dueDate = due,  // RFC 3339 date string, e.g. "2026-03-20T00:00:00.000Z"
-    completedDate = completed,
-    parentId = parent,
-    position = position,
-    etag = etag,
-    webViewLink = webViewLink,
-    linksJson = links?.takeIf { it.isNotEmpty() }?.let { linksList ->
-        JSONArray().apply {
-            linksList.forEach { link ->
-                put(JSONObject().apply {
-                    put("type", link.type ?: "")
-                    put("description", link.description ?: "")
-                    put("link", link.link ?: "")
-                })
-            }
-        }.toString()
-    },
-    assignmentInfoJson = assignmentInfo?.let { info ->
-        JSONObject().apply {
-            put("linkToTask", info.linkToTask ?: "")
-            put("surfaceType", info.surfaceType ?: "")
-            info.driveResourceInfo?.let { drive ->
-                put("driveResourceInfo", JSONObject().apply {
-                    put("driveFileId", drive.driveFileId ?: "")
-                    put("resourceKey", drive.resourceKey ?: "")
-                })
-            }
-            info.spaceInfo?.let { space ->
-                put("spaceInfo", JSONObject().apply {
-                    put("space", space.space ?: "")
-                })
-            }
-        }.toString()
-    },
+    content = GoogleTask(
+        title = title ?: "",
+        notes = notes,
+        createdDate = null, // Google Tasks API does not expose creation date
+        dueDate = due?.parseRfc3339ToEpochMs(),
+        parentId = parent,
+        position = position,
+        etag = etag,
+        completedDate = completed?.parseRfc3339ToEpochMs(),
+        isHidden = hidden == true,
+        webViewLink = webViewLink,
+        linksJson = links?.takeIf { it.isNotEmpty() }?.let { linksList ->
+            JSONArray().apply {
+                linksList.forEach { link ->
+                    put(JSONObject().apply {
+                        put("type", link.type ?: "")
+                        put("description", link.description ?: "")
+                        put("link", link.link ?: "")
+                    })
+                }
+            }.toString()
+        },
+        assignmentInfoJson = assignmentInfo?.let { info ->
+            JSONObject().apply {
+                put("linkToTask", info.linkToTask ?: "")
+                put("surfaceType", info.surfaceType ?: "")
+                info.driveResourceInfo?.let { drive ->
+                    put("driveResourceInfo", JSONObject().apply {
+                        put("driveFileId", drive.driveFileId ?: "")
+                        put("resourceKey", drive.resourceKey ?: "")
+                    })
+                }
+                info.spaceInfo?.let { space ->
+                    put("spaceInfo", JSONObject().apply {
+                        put("space", space.space ?: "")
+                    })
+                }
+            }.toString()
+        },
+    ),
 )
+
+// ---------------------------------------------------------------------------
+// RFC 3339 helpers for due/completed/updated dates (Google Tasks API format).
+// This is the only place in the library that touches this date format — everywhere
+// above [GoogleTasksNetworkSource] deals in epoch milliseconds.
+// ---------------------------------------------------------------------------
+
+private fun Long.toRfc3339DueDate(): String {
+    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    return sdf.format(java.util.Date(this))
+}
+
+private fun String.parseRfc3339ToEpochMs(): Long? = try {
+    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    sdf.parse(this)?.time
+} catch (e: Exception) { null }
