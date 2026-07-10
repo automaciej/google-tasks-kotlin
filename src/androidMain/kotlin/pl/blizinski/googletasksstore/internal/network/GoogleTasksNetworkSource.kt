@@ -145,7 +145,7 @@ internal class GoogleTasksNetworkSource(
     }
 }
 
-private fun Task.toRemoteRecord(): RemoteRecord<GoogleTask> = RemoteRecord(
+internal fun Task.toRemoteRecord(): RemoteRecord<GoogleTask> = RemoteRecord(
     remoteId = id,
     isCompleted = "completed" == status,
     isDeleted = deleted == true,
@@ -198,13 +198,13 @@ private fun Task.toRemoteRecord(): RemoteRecord<GoogleTask> = RemoteRecord(
 // above [GoogleTasksNetworkSource] deals in epoch milliseconds.
 // ---------------------------------------------------------------------------
 
-private fun Long.toRfc3339DueDate(): String {
+internal fun Long.toRfc3339DueDate(): String {
     val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
     sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
     return sdf.format(java.util.Date(this))
 }
 
-private fun String.parseRfc3339ToEpochMs(): Long? = try {
+internal fun String.parseRfc3339ToEpochMs(): Long? = try {
     val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
     sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
     sdf.parse(this)?.time
