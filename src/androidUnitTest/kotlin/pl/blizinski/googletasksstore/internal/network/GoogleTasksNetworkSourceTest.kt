@@ -9,7 +9,7 @@ class GoogleTasksNetworkSourceTest {
 
     @Test
     fun dueDateRoundTripsThroughRfc3339() {
-        // 2026-03-05T00:00:00.000Z
+        // 2026-03-07T00:00:00.000Z
         val epochMs = 1772841600000L
         val formatted = epochMs.toRfc3339DueDate()
         assertEquals(epochMs, formatted.parseRfc3339ToEpochMs())
