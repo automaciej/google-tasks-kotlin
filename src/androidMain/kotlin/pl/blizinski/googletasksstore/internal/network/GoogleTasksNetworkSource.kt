@@ -131,6 +131,18 @@ internal class GoogleTasksNetworkSource(
         withContext(Dispatchers.IO) {
             client.tasks().delete(remoteListId, remoteId).execute()
         }
+
+    override suspend fun moveRecord(
+        sourceRemoteListId: String,
+        remoteId: String,
+        destRemoteListId: String,
+        previousRemoteId: String?,
+    ): Unit = withContext(Dispatchers.IO) {
+        client.tasks().move(sourceRemoteListId, remoteId)
+            .setDestinationTasklist(destRemoteListId)
+            .apply { if (previousRemoteId != null) setPrevious(previousRemoteId) }
+            .execute()
+    }
 }
 
 private fun Task.toRemoteRecord(): RemoteRecord<GoogleTask> = RemoteRecord(

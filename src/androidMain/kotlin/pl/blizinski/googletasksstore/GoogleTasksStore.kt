@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.serializer
 import pl.blizinski.googletasksstore.internal.GoogleSyncErrorClassifier
 import pl.blizinski.googletasksstore.internal.GoogleTask
@@ -168,11 +169,17 @@ class GoogleTasksStore(
     // Public write API — optimistic local write + pending op + trigger sync
     // -----------------------------------------------------------------------
 
-    /** Runs a write that returns a value, reporting (rather than throwing) a fatal storage
-     *  error and returning [onError] instead — every genuine write in this class is a Room
-     *  call, so any exception here is that same class of failure, not a bug worth crashing on. */
+    /**
+     * Runs a write that returns a value, reporting (rather than throwing) a fatal storage
+     * error and returning [onError] instead — every genuine write in this class is a Room
+     * call, so any exception here is that same class of failure, not a bug worth crashing on.
+     *
+     * Acquires [SyncEngine.writeMutex] — shared with [syncEngine] — so a local write can never
+     * interleave with an in-flight sync flush/pull touching the same rows (see that mutex's
+     * doc for the concurrency bug this prevents).
+     */
     private suspend fun <T> guardWrite(onError: T, block: suspend () -> T): T = try {
-        block()
+        syncEngine.writeMutex.withLock { block() }
     } catch (e: Exception) {
         reportFatalStorageError(e)
         onError
@@ -291,6 +298,25 @@ class GoogleTasksStore(
         store.softDeleteRecord(localId)
         store.enqueuePendingOp(
             PendingOp(id = UUID.randomUUID().toString(), type = OpType.DELETE_RECORD, entityLocalId = localId, listLocalId = entity.listLocalId, createdAt = now)
+        )
+        poller.onLocalWrite()
+    }
+
+    /** Moves a task to [destListLocalId] in place — see [TaskStoreApi.moveTask]. */
+    override suspend fun moveTask(localId: String, destListLocalId: String): Unit = guardWrite(onError = Unit) {
+        val entity = store.getRecordByLocalId(localId) ?: return@guardWrite
+        val sourceListLocalId = entity.listLocalId
+        if (sourceListLocalId == destListLocalId) return@guardWrite
+        val now = System.currentTimeMillis()
+        // reassignRecord also rewrites this entity's other pending ops' listLocalId (e.g. a
+        // not-yet-pushed CREATE_RECORD), so a still-unsynced task simply ends up created
+        // directly in the destination — see PendingOpsProcessor.merge()'s CREATE+MOVE folding.
+        store.reassignRecord(localId, destListLocalId)
+        store.enqueuePendingOp(
+            PendingOp(
+                id = UUID.randomUUID().toString(), type = OpType.MOVE_RECORD, entityLocalId = localId,
+                listLocalId = destListLocalId, contentJson = sourceListLocalId, createdAt = now,
+            )
         )
         poller.onLocalWrite()
     }

@@ -46,6 +46,13 @@ interface TaskStoreApi {
 
     suspend fun deleteTask(localId: String)
 
+    /**
+     * Moves a task to [destListLocalId] in place, preserving [localId] — Google Tasks supports
+     * moving a task between lists natively (`tasks.move` with `destinationTasklist`), so callers
+     * never need to fall back to delete-and-recreate for this source.
+     */
+    suspend fun moveTask(localId: String, destListLocalId: String)
+
     // --- Lifecycle ---
 
     /** Runs a full sync cycle synchronously (flush pending ops, then pull). */
