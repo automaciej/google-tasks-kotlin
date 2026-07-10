@@ -4,6 +4,10 @@ data class SyncStatus(
     val isSyncing: Boolean = false,
     val lastSyncedAt: Long? = null,
     val pendingOpCount: Int = 0,
+    /** Ops that have failed at least once — still retried on every sync cycle (unchanged
+     *  behavior), tracked separately so a permanently-failing op is visibly distinguishable
+     *  from one still in normal flight (counted in [pendingOpCount] until v2). */
+    val failedOpCount: Int = 0,
     val recentErrors: List<SyncError> = emptyList(),
     /**
      * Non-null when the last sync failed because the user needs to grant OAuth

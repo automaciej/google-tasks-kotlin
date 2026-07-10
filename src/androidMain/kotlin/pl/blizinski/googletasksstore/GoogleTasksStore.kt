@@ -36,6 +36,7 @@ import pl.blizinski.tasksync.SyncEngine
 import pl.blizinski.tasksync.SyncWorkerDependencies
 import pl.blizinski.tasksync.SyncedListRecord
 import pl.blizinski.tasksync.SyncedRecord
+import pl.blizinski.tasksync.accumulateRecentErrors
 import pl.blizinski.tasksync.db.TaskSyncDatabase
 import java.io.Closeable
 import java.util.UUID
@@ -113,8 +114,33 @@ class GoogleTasksStore(
     private val _syncStatus = MutableStateFlow(SyncStatus())
 
     init {
-        SyncWorkerDependencies.put(config.dbName, SyncWorkerDependencies.Deps(syncEngine, syncConfig))
+        SyncWorkerDependencies.put(
+            config.dbName,
+            SyncWorkerDependencies.Deps(syncEngine, syncConfig, onSyncResult = ::applySyncResult),
+        )
         poller.start()
+    }
+
+    /**
+     * Applies one sync cycle's result to [_syncStatus] — shared by both the foreground
+     * [forceSync] call site and the background [pl.blizinski.tasksync.SyncWorker] call site
+     * registered above, so a background sync error is no longer silently discarded (previously
+     * only [forceSync] updated [SyncStatus.recentErrors]/[SyncStatus.lastSyncedAt]).
+     */
+    private fun applySyncResult(result: SyncEngine.SyncResult) {
+        val now = System.currentTimeMillis()
+        _syncStatus.update { current ->
+            current.copy(
+                isSyncing = false,
+                lastSyncedAt = now,
+                recentErrors = accumulateRecentErrors(
+                    previous = current.recentErrors,
+                    new = result.errors.map { it.toPublic() },
+                    max = config.maxRecentErrors,
+                ),
+                consentIntent = result.consentIntent as? android.content.Intent,
+            )
+        }
     }
 
     /**
@@ -155,15 +181,16 @@ class GoogleTasksStore(
         store.records(listLocalId).guardStorage(emptyList()).map { records -> records.map { it.toTask() } }
 
     /**
-     * Live sync status: [SyncStatus.pendingOpCount] is always current (sourced
-     * from Room). [SyncStatus.isSyncing], [SyncStatus.lastSyncedAt], and
-     * [SyncStatus.recentErrors] reflect only explicit [forceSync] calls;
-     * background WorkManager syncs do not update them in v1.
+     * Live sync status: [SyncStatus.pendingOpCount]/[SyncStatus.failedOpCount] are always
+     * current (sourced from Room). [SyncStatus.isSyncing], [SyncStatus.lastSyncedAt], and
+     * [SyncStatus.recentErrors] reflect every sync cycle, foreground ([forceSync]) or
+     * background ([pl.blizinski.tasksync.SyncWorker]) — see [applySyncResult].
      */
     override fun syncStatus(): Flow<SyncStatus> = combine(
         _syncStatus,
         store.pendingOpCount().guardStorage(0),
-    ) { status, count -> status.copy(pendingOpCount = count) }
+        store.failedOpCount().guardStorage(0),
+    ) { status, pending, failed -> status.copy(pendingOpCount = pending, failedOpCount = failed) }
 
     // -----------------------------------------------------------------------
     // Public write API — optimistic local write + pending op + trigger sync
@@ -328,20 +355,7 @@ class GoogleTasksStore(
     override suspend fun forceSync() {
         _syncStatus.update { it.copy(isSyncing = true, consentIntent = null) }
         try {
-            val result = syncEngine.sync()
-            val now = System.currentTimeMillis()
-            _syncStatus.update { current ->
-                val mappedErrors = result.errors.map { it.toPublic() }
-                val allErrors = mappedErrors + current.recentErrors
-                current.copy(
-                    isSyncing = false,
-                    lastSyncedAt = now,
-                    // Clear accumulated errors when the new sync is clean; otherwise accumulate.
-                    recentErrors = if (mappedErrors.isEmpty()) emptyList()
-                                   else allErrors.take(config.maxRecentErrors),
-                    consentIntent = result.consentIntent as? android.content.Intent,
-                )
-            }
+            applySyncResult(syncEngine.sync())
         } catch (e: Exception) {
             reportFatalStorageError(e)
             _syncStatus.update { it.copy(isSyncing = false) }
