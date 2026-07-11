@@ -58,6 +58,16 @@ interface TaskStoreApi {
     /** Runs a full sync cycle synchronously (flush pending ops, then pull). */
     suspend fun forceSync()
 
+    /**
+     * Like [forceSync], but pulls every list from scratch instead of using each list's stored
+     * incremental-sync cursor. Use this to repair local state that's drifted from the server in
+     * a way incremental sync can't detect — e.g. a task whose local list assignment was
+     * optimistically changed to a list that turned out not to exist (or belongs to a different
+     * account), so the server never saw a matching update and an incremental pull wouldn't
+     * re-fetch it.
+     */
+    suspend fun fullSync()
+
     /** Cancels background work and closes the database. */
     fun close()
 }

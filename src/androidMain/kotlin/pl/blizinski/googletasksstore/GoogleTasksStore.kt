@@ -362,6 +362,16 @@ class GoogleTasksStore(
         }
     }
 
+    override suspend fun fullSync() {
+        _syncStatus.update { it.copy(isSyncing = true, consentIntent = null) }
+        try {
+            applySyncResult(syncEngine.fullSync())
+        } catch (e: Exception) {
+            reportFatalStorageError(e)
+            _syncStatus.update { it.copy(isSyncing = false) }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Lifecycle
     // -----------------------------------------------------------------------
