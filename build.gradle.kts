@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.androidKotlinMultiplatformLibrary)
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.ksp)
     `maven-publish`
@@ -12,10 +12,17 @@ group = "pl.blizinski"
 version = "0.1.0"
 
 kotlin {
-    androidTarget {
-        publishLibraryVariants("release")
+    android {
+        namespace = "pl.blizinski.googletasksstore"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
+
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
+        }
+
+        withHostTestBuilder {}.configure {
+            isReturnDefaultValues = true
         }
     }
 
@@ -32,7 +39,7 @@ kotlin {
             // as a sibling directory — see settings.gradle.kts.
             implementation("com.github.automaciej:task-sync-kotlin:v0.1.1")
         }
-        androidUnitTest.dependencies {
+        getByName("androidHostTest").dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.coroutines.test)
         }
@@ -41,20 +48,4 @@ kotlin {
 
 dependencies {
     add("kspAndroid", libs.room.compiler)
-}
-
-android {
-    namespace = "pl.blizinski.googletasksstore"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-    testOptions {
-        unitTests.isReturnDefaultValues = true
-    }
 }
