@@ -1,6 +1,7 @@
 package pl.blizinski.googletasksstore.internal
 
 import io.ktor.client.plugins.ResponseException
+import pl.blizinski.tasksync.NoStoredTokenException
 import pl.blizinski.tasksync.SyncErrorClassifier
 import pl.blizinski.tasksync.SyncErrorKind
 
@@ -17,8 +18,11 @@ import pl.blizinski.tasksync.SyncErrorKind
  */
 internal class GoogleSyncErrorClassifierWasm : SyncErrorClassifier {
 
-    override fun classifySpecial(e: Exception): SyncErrorKind? =
-        if (httpStatus(e) == 401) SyncErrorKind.AUTH_FAILED else null
+    override fun classifySpecial(e: Exception): SyncErrorKind? = when {
+        e is NoStoredTokenException -> SyncErrorKind.AUTH_FAILED
+        httpStatus(e) == 401 -> SyncErrorKind.AUTH_FAILED
+        else -> null
+    }
 
     override fun httpStatus(e: Exception): Int? =
         (e as? ResponseException)?.response?.status?.value

@@ -22,7 +22,7 @@ import pl.blizinski.googletasksstore.internal.toTaskList
 import pl.blizinski.googletasksstore.models.SyncStatus
 import pl.blizinski.googletasksstore.models.Task
 import pl.blizinski.googletasksstore.models.TaskList
-import pl.blizinski.tasksync.InMemoryLocalStore
+import pl.blizinski.tasksync.IndexedDbLocalStore
 import pl.blizinski.tasksync.OpType
 import pl.blizinski.tasksync.PendingOp
 import pl.blizinski.tasksync.PendingOpsProcessor
@@ -36,10 +36,11 @@ import pl.blizinski.tasksync.accumulateRecentErrors
  * Docs/designs/2026-07-30-web-wasmjs-google-tasks-poc.md.
  *
  * Structurally mirrors the Android target's `GoogleTasksStore`: wires the *same*
- * [SyncEngine]/[PendingOpsProcessor] Android uses into an [InMemoryLocalStore] (no Room, no
- * persistence across page reloads) and [GoogleTasksNetworkSourceWasm] (Ktor, no
- * `google-api-client-android`). No [pl.blizinski.tasksync.AdaptivePoller]/WorkManager — this PoC
- * syncs only on demand ([forceSync]/[fullSync]), same UX as the GitHub Issues PoC.
+ * [SyncEngine]/[PendingOpsProcessor] Android uses into an [IndexedDbLocalStore] (persisted
+ * across page reloads via IndexedDB — see TaskCompass's
+ * Docs/designs/2026-08-02-web-indexeddb-persistence.md) and [GoogleTasksNetworkSourceWasm]
+ * (Ktor, no `google-api-client-android`). No [pl.blizinski.tasksync.AdaptivePoller]/WorkManager
+ * — this still syncs only on demand ([forceSync]/[fullSync]), same UX as the GitHub Issues store.
  */
 @OptIn(ExperimentalTime::class, ExperimentalUuidApi::class)
 class GoogleTasksStoreWasm(
@@ -48,7 +49,7 @@ class GoogleTasksStoreWasm(
 ) : TaskStoreApi {
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val store = InMemoryLocalStore<GoogleTask, GoogleTaskList>()
+    private val store = IndexedDbLocalStore(config.dbName, serializer<GoogleTask>(), serializer<GoogleTaskList>())
     private val network = GoogleTasksNetworkSourceWasm(tokenProvider)
     private val errorClassifier = GoogleSyncErrorClassifierWasm()
     private val pendingOpsProcessor = PendingOpsProcessor(store, network, serializer<GoogleTask>(), errorClassifier)
