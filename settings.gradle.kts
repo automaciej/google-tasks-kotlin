@@ -42,6 +42,8 @@ if (taskSyncKotlinLocal.exists()) {
     includeBuild(taskSyncKotlinLocal) {
         dependencySubstitution {
             substitute(module("com.github.automaciej:task-sync-kotlin")).using(project(":"))
+            substitute(module("com.github.automaciej.task-sync-kotlin:task-sync-kotlin-android")).using(project(":"))
+            substitute(module("com.github.automaciej.task-sync-kotlin:task-sync-kotlin-wasm-js")).using(project(":"))
         }
     }
 }
