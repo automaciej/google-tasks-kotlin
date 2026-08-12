@@ -7,4 +7,4 @@ jdk:
 # any JitPack-based project, so it's skipped for published builds; only the android + common
 # publications (what consumers actually need) are built and published.
 install:
-  - ./gradlew publishAndroidReleasePublicationToMavenLocal publishKotlinMultiplatformPublicationToMavenLocal -Pgroup=com.github.automaciej -Pversion=$VERSION
+  - ./gradlew publishAndroidPublicationToMavenLocal publishKotlinMultiplatformPublicationToMavenLocal -Pgroup=com.github.automaciej -Pversion=$VERSION
