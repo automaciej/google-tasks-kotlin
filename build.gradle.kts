@@ -51,7 +51,7 @@ kotlin {
             // "-android" artifact rather than the generic root coordinate: JitPack's rewritten
             // Gradle module metadata doesn't reliably resolve cross-artifact "available-at"
             // variants once task-sync-kotlin publishes more than one target.
-            implementation("com.github.automaciej:task-sync-kotlin-android:v0.2.0")
+            implementation("com.github.automaciej.task-sync-kotlin:task-sync-kotlin-android:v0.2.0")
         }
         getByName("androidHostTest").dependencies {
             implementation(libs.kotlin.test)
@@ -66,7 +66,7 @@ kotlin {
                 implementation(libs.ktor.serialization.kotlinx.json)
                 // See the androidMain dependency above for why this is pinned to the
                 // target-specific artifact instead of the generic root coordinate.
-                implementation("com.github.automaciej:task-sync-kotlin-wasm-js:v0.2.0")
+                implementation("com.github.automaciej.task-sync-kotlin:task-sync-kotlin-wasm-js:v0.2.0")
             }
         }
     }
