@@ -38,9 +38,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.coroutines.core)
-            // Generic root coordinate works here (unlike the androidMain/wasmJsMain
-            // dependencies below): commonMain consumes task-sync-kotlin's Kotlin metadata
-            // variant, which JitPack does publish correctly under the plain group.
+            // Declared once here, not repeated per-platform: Kotlin's multiplatform dependency
+            // resolution routes each target (android/wasmJs) to the matching published variant
+            // automatically. Resolved via JitPack normally; substituted for the local checkout
+            // when one exists as a sibling directory — see settings.gradle.kts.
             implementation("com.github.automaciej:task-sync-kotlin:v0.2.0")
         }
         androidMain.dependencies {
@@ -50,12 +51,6 @@ kotlin {
             implementation(libs.google.api.client.android)
             implementation(libs.google.api.services.tasks)
             implementation(libs.work.runtime.ktx)
-            // Resolved via JitPack normally; substituted for the local checkout when one exists
-            // as a sibling directory — see settings.gradle.kts. Pinned to the target-specific
-            // "-android" artifact rather than the generic root coordinate: JitPack's rewritten
-            // Gradle module metadata doesn't reliably resolve cross-artifact "available-at"
-            // variants once task-sync-kotlin publishes more than one target.
-            implementation("com.github.automaciej.task-sync-kotlin:task-sync-kotlin-android:v0.2.0")
         }
         getByName("androidHostTest").dependencies {
             implementation(libs.kotlin.test)
@@ -68,9 +63,6 @@ kotlin {
                 implementation(libs.ktor.client.js)
                 implementation(libs.ktor.client.content.negotiation)
                 implementation(libs.ktor.serialization.kotlinx.json)
-                // See the androidMain dependency above for why this is pinned to the
-                // target-specific artifact instead of the generic root coordinate.
-                implementation("com.github.automaciej.task-sync-kotlin:task-sync-kotlin-wasm-js:v0.2.0")
             }
         }
     }
