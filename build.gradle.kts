@@ -38,6 +38,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.coroutines.core)
+            // Generic root coordinate works here (unlike the androidMain/wasmJsMain
+            // dependencies below): commonMain consumes task-sync-kotlin's Kotlin metadata
+            // variant, which JitPack does publish correctly under the plain group.
+            implementation("com.github.automaciej:task-sync-kotlin:v0.2.0")
         }
         androidMain.dependencies {
             implementation(libs.serialization.json)
