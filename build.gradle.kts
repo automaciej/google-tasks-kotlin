@@ -50,7 +50,7 @@ kotlin {
             implementation(libs.coroutines.core)
             // Resolved via JitPack normally; substituted for the local checkout when one exists
             // as a sibling directory — see settings.gradle.kts.
-            implementation("com.github.automaciej:task-sync-kotlin:v0.2.0")
+            implementation("com.github.automaciej:task-sync-kotlin:v0.2.1")
         }
         androidMain.dependencies {
             implementation(libs.serialization.json)
@@ -72,7 +72,7 @@ kotlin {
                     implementation(libs.ktor.client.js)
                     implementation(libs.ktor.client.content.negotiation)
                     implementation(libs.ktor.serialization.kotlinx.json)
-                    implementation("com.github.automaciej:task-sync-kotlin:v0.2.0")
+                    implementation("com.github.automaciej:task-sync-kotlin:v0.2.1")
                 }
             }
         }
