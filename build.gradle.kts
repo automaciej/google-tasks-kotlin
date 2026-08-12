@@ -12,6 +12,14 @@ plugins {
 group = "pl.blizinski"
 version = "0.1.0"
 
+// JitPack can't reliably resolve task-sync-kotlin's Gradle module metadata once it publishes
+// more than one target (android + wasm-js) — the wasmJs target's own npm/compile-classpath
+// resolution ends up trying (and failing) to pick a variant across targets. Since the wasmJs
+// target here is a proof-of-concept unused by any JitPack-based project, it's left out of
+// JitPack builds entirely (set via `-PjitpackBuild=true` in jitpack.yml); local development
+// (including the wasmJs POC) is unaffected.
+val isJitpackBuild = project.hasProperty("jitpackBuild")
+
 kotlin {
     android {
         namespace = "pl.blizinski.googletasksstore"
@@ -29,18 +37,19 @@ kotlin {
 
     // wasmJs proof-of-concept target — see TaskCompass's
     // Docs/designs/2026-07-30-web-wasmjs-google-tasks-poc.md. Additive only: does not touch
-    // the android {} block above.
-    @OptIn(ExperimentalWasmDsl::class)
-    wasmJs {
-        browser()
+    // the android {} block above. Skipped on JitPack — see isJitpackBuild above.
+    if (!isJitpackBuild) {
+        @OptIn(ExperimentalWasmDsl::class)
+        wasmJs {
+            browser()
+        }
     }
 
     sourceSets {
         commonMain.dependencies {
             implementation(libs.coroutines.core)
-            // Generic root coordinate: resolves fine for commonMain's own metadata
-            // compilation. Resolved via JitPack normally; substituted for the local checkout
-            // when one exists as a sibling directory — see settings.gradle.kts.
+            // Resolved via JitPack normally; substituted for the local checkout when one exists
+            // as a sibling directory — see settings.gradle.kts.
             implementation("com.github.automaciej:task-sync-kotlin:v0.2.0")
         }
         androidMain.dependencies {
@@ -50,27 +59,21 @@ kotlin {
             implementation(libs.google.api.client.android)
             implementation(libs.google.api.services.tasks)
             implementation(libs.work.runtime.ktx)
-            // Explicit target-specific pin, in addition to the commonMain dependency above:
-            // JitPack's rewritten Gradle module metadata doesn't reliably resolve the root
-            // coordinate's cross-artifact "available-at" variants once task-sync-kotlin
-            // publishes more than one target, so androidCompileClasspath needs this to land on
-            // the right artifact directly.
-            implementation("com.github.automaciej.task-sync-kotlin:task-sync-kotlin-android:v0.2.0")
         }
         getByName("androidHostTest").dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.coroutines.test)
         }
-        val wasmJsMain by getting {
-            dependencies {
-                implementation(libs.serialization.json)
-                implementation(libs.ktor.client.core)
-                implementation(libs.ktor.client.js)
-                implementation(libs.ktor.client.content.negotiation)
-                implementation(libs.ktor.serialization.kotlinx.json)
-                // See the androidMain dependency above for why this explicit pin is needed
-                // alongside the commonMain generic dependency.
-                implementation("com.github.automaciej.task-sync-kotlin:task-sync-kotlin-wasm-js:v0.2.0")
+        if (!isJitpackBuild) {
+            val wasmJsMain by getting {
+                dependencies {
+                    implementation(libs.serialization.json)
+                    implementation(libs.ktor.client.core)
+                    implementation(libs.ktor.client.js)
+                    implementation(libs.ktor.client.content.negotiation)
+                    implementation(libs.ktor.serialization.kotlinx.json)
+                    implementation("com.github.automaciej:task-sync-kotlin:v0.2.0")
+                }
             }
         }
     }

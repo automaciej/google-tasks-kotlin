@@ -1,10 +1,7 @@
 jdk:
   - openjdk21
-# JitPack's default `assemble publishToMavenLocal` also builds the wasmJs target's npm
-# packaging tasks, which fail to resolve task-sync-kotlin's wasm-js variant on JitPack (its
-# Gradle module metadata for cross-target "available-at" variants isn't reliable there — see
-# the comments in build.gradle.kts). The wasmJs target is a proof-of-concept, not consumed by
-# any JitPack-based project, so it's skipped for published builds; only the android + common
-# publications (what consumers actually need) are built and published.
+# -PjitpackBuild=true disables the wasmJs proof-of-concept target for this build — see the
+# comment in build.gradle.kts for why (JitPack can't reliably resolve task-sync-kotlin's
+# multi-target Gradle module metadata).
 install:
-  - ./gradlew publishAndroidPublicationToMavenLocal publishKotlinMultiplatformPublicationToMavenLocal -Pgroup=com.github.automaciej -Pversion=$VERSION
+  - ./gradlew clean assemble publishToMavenLocal -PjitpackBuild=true -Pgroup=com.github.automaciej -Pversion=$VERSION
