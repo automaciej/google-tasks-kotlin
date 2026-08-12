@@ -48,7 +48,7 @@ kotlin {
             implementation(libs.work.runtime.ktx)
             // Resolved via JitPack normally; substituted for the local checkout when one exists
             // as a sibling directory — see settings.gradle.kts.
-            implementation("com.github.automaciej:task-sync-kotlin:v0.1.1")
+            implementation("com.github.automaciej:task-sync-kotlin:v0.2.0")
         }
         getByName("androidHostTest").dependencies {
             implementation(libs.kotlin.test)
@@ -61,7 +61,7 @@ kotlin {
                 implementation(libs.ktor.client.js)
                 implementation(libs.ktor.client.content.negotiation)
                 implementation(libs.ktor.serialization.kotlinx.json)
-                implementation("com.github.automaciej:task-sync-kotlin:v0.1.1")
+                implementation("com.github.automaciej:task-sync-kotlin:v0.2.0")
             }
         }
     }
