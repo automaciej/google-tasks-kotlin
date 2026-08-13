@@ -40,15 +40,12 @@ ID or other app-specific credential.
 
 ## What it is *not*
 
-- **Android-only.** Built on `task-sync-kotlin`, which currently declares
-  only an `androidTarget` — see that repo's README for what a
-  multiplatform port would require.
-- **Not a general-purpose task-list abstraction.** `Task`/`TaskList` here
-  are Google Tasks' own shape (title, notes, due date, completion). It's
-  not meant to be swapped for another source's schema — that's what
-  `microsoft-todo-kotlin` is, as a separate, independently-versioned library
-  sharing the same underlying engine.
-
+- **Not multiplatform yet, in practice.** `task-sync-kotlin` itself already
+  is (`androidTarget` + `wasmJs`), and this library has a `wasmJs` target
+  too, as a first step toward a web version — but it's currently a
+  proof-of-concept (Room/Google API client-android-based Android internals
+  aren't ported) and is stripped from JitPack builds — see
+  `build.gradle.kts`.
 ## Usage
 
 Add the JitPack repository:
