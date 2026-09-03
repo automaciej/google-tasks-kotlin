@@ -46,6 +46,26 @@ ID or other app-specific credential.
   proof-of-concept (Room/Google API client-android-based Android internals
   aren't ported) and is stripped from JitPack builds — see
   `build.gradle.kts`.
+- **Not a general-purpose task-list abstraction.** `Task`/`TaskList` here
+  are Google Tasks' own shape (title, notes, due date, completion). It's
+  not meant to be swapped for another source's schema — that's what
+  `microsoft-todo-kotlin` is, as a separate, independently-versioned library
+  sharing the same underlying engine.
+- **No due *time*, only a due *date*.** This is a limitation of the Google
+  Tasks API itself, not of this library. Per the
+  [API reference](https://developers.google.com/workspace/tasks/reference/rest/v1/tasks)
+  for `Task.due`:
+
+  > Scheduled date for the task (as an RFC 3339 timestamp). Optional. This
+  > represents the day that the task should be done, or that the task is
+  > visible on the calendar grid. It doesn't represent the deadline of the
+  > task. Only date information is recorded; the time portion of the
+  > timestamp is discarded when setting this field. It isn't possible to
+  > read or write the time that a task is scheduled for using the API.
+
+  See also the upstream feature request tracking this:
+  [issuetracker.google.com/issues/166896024](https://issuetracker.google.com/issues/166896024).
+
 ## Usage
 
 Add the JitPack repository:
