@@ -5,6 +5,7 @@ import pl.blizinski.googletasksstore.internal.GoogleSyncErrorClassifierWasm
 import pl.blizinski.googletasksstore.internal.GoogleTask
 import pl.blizinski.googletasksstore.internal.GoogleTaskList
 import pl.blizinski.googletasksstore.internal.GoogleTasksContentAdapter
+import pl.blizinski.googletasksstore.internal.GoogleTasksContentMerger
 import pl.blizinski.googletasksstore.internal.network.GoogleTasksNetworkSourceWasm
 import pl.blizinski.tasksync.model.AccessTokenProvider
 import pl.blizinski.tasksync.model.StoreConfig
@@ -26,4 +27,5 @@ fun googleTasksWasmStore(
     recordSerializer = serializer<GoogleTask>(),
     listSerializer = serializer<GoogleTaskList>(),
     adapter = GoogleTasksContentAdapter,
+    merger = GoogleTasksContentMerger,
 )

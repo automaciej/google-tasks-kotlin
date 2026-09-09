@@ -7,6 +7,7 @@ import pl.blizinski.googletasksstore.internal.GoogleSyncErrorClassifier
 import pl.blizinski.googletasksstore.internal.GoogleTask
 import pl.blizinski.googletasksstore.internal.GoogleTaskList
 import pl.blizinski.googletasksstore.internal.GoogleTasksContentAdapter
+import pl.blizinski.googletasksstore.internal.GoogleTasksContentMerger
 import pl.blizinski.googletasksstore.internal.MIGRATION_1_6
 import pl.blizinski.googletasksstore.internal.MIGRATION_5_6
 import pl.blizinski.googletasksstore.internal.network.GoogleTasksNetworkSource
@@ -37,5 +38,6 @@ fun googleTasksStore(
     recordSerializer = serializer<GoogleTask>(),
     listSerializer = serializer<GoogleTaskList>(),
     adapter = GoogleTasksContentAdapter,
+    merger = GoogleTasksContentMerger,
     migrations = listOf(MIGRATION_5_6, MIGRATION_1_6),
 )
