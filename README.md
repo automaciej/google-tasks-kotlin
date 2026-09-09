@@ -1,97 +1,95 @@
-# google-tasks-store
+# google-tasks-kotlin
 
 [![](https://jitpack.io/v/automaciej/google-tasks-kotlin.svg)](https://jitpack.io/#automaciej/google-tasks-kotlin)
 
-Android library that wraps the [Google Tasks API](https://developers.google.com/tasks)
-with a local Room cache and exposes a reactive `TaskStoreApi`, built on top
-of [task-sync-kotlin](https://github.com/automaciej/task-sync-kotlin)'s
-shared offline-first sync engine.
+Kotlin Multiplatform library that wraps the [Google Tasks API](https://developers.google.com/tasks)
+with a local Room cache and exposes it through the shared
+[`TaskStore`](https://github.com/automaciej/task-sync-kotlin) contract, built on
+[task-sync-kotlin](https://github.com/automaciej/task-sync-kotlin)'s offline-first
+sync engine. (`task-sync-kotlin` was originally extracted from this library, then
+grew into the shared model + store contract the whole family now uses.)
 
-This is not a thin, stateless network wrapper: reads and writes go through a
-local Room database that is the actual source of truth for the UI, kept in
-sync with Google's servers in the background. Google Tasks itself remains
-the ultimate source of truth for task data; this library's cache is what
-lets the app work fully offline in between syncs.
+Reads and writes go through a local Room database that is the source of truth for
+the UI, reconciled with Google's servers in the background, so the app works
+fully offline between syncs. Google Tasks remains the ultimate source of truth
+for task data.
 
-This library never handles Google sign-in itself — it takes a
-`GoogleAccountCredential` supplied by the consuming app, which owns the
-actual OAuth/`GoogleSignIn` flow. This keeps the library free of any client
-ID or other app-specific credential.
+The library never handles Google sign-in — on Android it takes a
+`GoogleAccountCredential` the app already manages; on wasmJs it takes an
+`AccessTokenProvider` (`pl.blizinski.tasksync.model.AccessTokenProvider`).
 
-## Features
+## One contract, four sources
 
-- **`TaskStoreApi`**: reactive `Flow`s of task lists and tasks per list, plus
-  a `Flow<SyncStatus>` for surfacing sync errors/progress in the UI.
-- **Optimistic writes**: `createTask`/`updateTask`/`completeTask`/`deleteTask`/
-  `moveTask` and their list-level equivalents apply to the local cache
-  immediately and queue for background push — no manual refresh needed
-  after a write.
-- **Native cross-list move**: Google Tasks' `tasks.move` (with
-  `destinationTasklist`) is used directly, so moving a task between lists
-  never falls back to delete-and-recreate.
-- **Adaptive background polling and pending-op merging** inherited from
-  `task-sync-kotlin` (see that repo's README for the full feature list):
-  op-merging, tombstone detection, per-account polling isolation via
-  `AdaptivePoller`, and structured `SyncErrorKind` classification specific
-  to Google's auth/consent errors.
-- **`forceSync()` / `fullSync()`**: run a sync cycle synchronously on demand,
-  with `fullSync()` re-pulling every list from scratch to repair local state
-  that drifted in a way incremental sync can't catch.
+`google-tasks-kotlin`, `microsoft-todo-kotlin`, `github-issues-kotlin` and
+`todoist-kotlin` are separate, independently-versioned libraries that **all
+expose the same `pl.blizinski.tasksync.store.TaskStore` interface over the same
+`pl.blizinski.tasksync.model.Task` / `TaskList` types**. A consuming app can hold
+several side by side and treat them uniformly, branching only on each one's
+`StoreCapabilities` (`GoogleTasks.capabilities`).
 
-## What it is *not*
+## API
 
-- **Not multiplatform yet, in practice.** `task-sync-kotlin` itself already
-  is (`androidTarget` + `wasmJs`), and this library has a `wasmJs` target
-  too, as a first step toward a web version — but it's currently a
-  proof-of-concept (Room/Google API client-android-based Android internals
-  aren't ported) and is stripped from JitPack builds — see
-  `build.gradle.kts`.
-- **Not a general-purpose task-list abstraction.** `Task`/`TaskList` here
-  are Google Tasks' own shape (title, notes, due date, completion). It's
-  not meant to be swapped for another source's schema — that's what
-  `microsoft-todo-kotlin` is, as a separate, independently-versioned library
-  sharing the same underlying engine.
-- **No due *time*, only a due *date*.** This is a limitation of the Google
-  Tasks API itself, not of this library. Per the
-  [API reference](https://developers.google.com/workspace/tasks/reference/rest/v1/tasks)
-  for `Task.due`:
+```kotlin
+// Android
+val store: TaskStore = googleTasksStore(
+    context,
+    credential,                        // GoogleAccountCredential
+    StoreConfig(dbName = "google_tasks_store_$accountId"),
+)
+// wasmJs
+val store: TaskStore = googleTasksWasmStore(tokenProvider, StoreConfig(dbName = "google_tasks_store"))
+```
 
-  > Scheduled date for the task (as an RFC 3339 timestamp). Optional. This
-  > represents the day that the task should be done, or that the task is
-  > visible on the calendar grid. It doesn't represent the deadline of the
-  > task. Only date information is recorded; the time portion of the
-  > timestamp is discarded when setting this field. It isn't possible to
-  > read or write the time that a task is scheduled for using the API.
+`TaskStore` gives you `Flow`s of task lists and tasks per list, a
+`Flow<SyncStatus>`, optimistic `createTask`/`updateTask`/`completeTask`/
+`uncompleteTask`/`deleteTask`/`moveTask` (native `tasks.move`, never
+delete-and-recreate) and the list-level equivalents, and `forceSync()`/
+`fullSync()`. Op-merging, tombstone detection, per-account polling isolation and
+Google-specific auth/consent `SyncErrorKind` classification are inherited from
+`task-sync-kotlin`. A one-off Room migration (`MIGRATION_5_6` / `MIGRATION_1_6`)
+carries pre-`task-sync-kotlin` installs across.
 
-  See also the upstream feature request tracking this:
-  [issuetracker.google.com/issues/166896024](https://issuetracker.google.com/issues/166896024).
+## No due *time*, only a due *date*
+
+A limitation of the Google Tasks API itself. Per the
+[API reference](https://developers.google.com/workspace/tasks/reference/rest/v1/tasks)
+for `Task.due`:
+
+> Only date information is recorded; the time portion of the timestamp is
+> discarded when setting this field. It isn't possible to read or write the time
+> that a task is scheduled for using the API.
+
+`GoogleTasks.capabilities.supportsDueTime` is `false`; a `TaskDraft` carrying a
+time-of-day is truncated to that day. Upstream feature request:
+[issuetracker.google.com/issues/166896024](https://issuetracker.google.com/issues/166896024).
+
+## Targets
+
+`androidTarget` (Room + `google-api-client-android`) and a `wasmJs` target
+(`googleTasksWasmStore`, IndexedDB, Ktor, sync-on-demand — a
+proof-of-concept). wasmJs is excluded from JitPack builds (see `jitpack.yml`).
 
 ## Usage
 
-Add the JitPack repository:
-
 ```kotlin
+// settings.gradle.kts
 dependencyResolutionManagement {
-    repositories {
-        maven { url = uri("https://jitpack.io") }
-    }
+    repositories { maven { url = uri("https://jitpack.io") } }
 }
 ```
-
-Add the dependency:
 
 ```kotlin
+// build.gradle.kts
 dependencies {
-    implementation("com.github.automaciej:google-tasks-kotlin:0.1.0")
+    implementation("com.github.automaciej:google-tasks-kotlin:v0.3.0")
 }
 ```
 
-Construct a `GoogleTasksStore` with a `GoogleAccountCredential` your app
-already manages (this library never triggers or stores sign-in state
-itself), then consume it through `TaskStoreApi`.
+Construct with a `GoogleAccountCredential` your app already manages, then consume
+the returned `TaskStore`.
 
 ## Build
 
 ```
-./gradlew build
+./build.sh build
 ```
