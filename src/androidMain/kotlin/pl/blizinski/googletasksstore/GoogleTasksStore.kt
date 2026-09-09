@@ -24,14 +24,14 @@ import pl.blizinski.tasksync.store.buildAndroidTaskStore
  * every localId/remoteId) and the no-op [MIGRATION_1_6] (installs left at version 1 by an old
  * destructive-fallback incident) are always applied.
  */
-fun GoogleTasks.store(
+fun googleTasksStore(
     context: Context,
     credential: GoogleAccountCredential,
     config: StoreConfig,
 ): TaskStore = buildAndroidTaskStore(
     context = context,
     config = config,
-    capabilities = capabilities,
+    capabilities = GoogleTasks.capabilities,
     network = GoogleTasksNetworkSource(credential),
     errorClassifier = GoogleSyncErrorClassifier(),
     recordSerializer = serializer<GoogleTask>(),

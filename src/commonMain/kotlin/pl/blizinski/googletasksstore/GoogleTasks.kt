@@ -5,7 +5,7 @@ import pl.blizinski.tasksync.model.StoreCapabilities
 
 /**
  * Static facts about the Google Tasks source, available before any account is connected.
- * [GoogleTasks.store] (androidMain) / [GoogleTasks.wasmStore] (wasmJsMain) build a
+ * [googleTasksStore] (androidMain) / [googleTasksWasmStore] (wasmJsMain) build a
  * [pl.blizinski.tasksync.store.TaskStore] for a connected account.
  */
 object GoogleTasks {
