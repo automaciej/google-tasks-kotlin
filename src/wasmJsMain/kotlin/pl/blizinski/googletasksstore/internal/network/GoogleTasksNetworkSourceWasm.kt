@@ -17,7 +17,7 @@ import kotlin.time.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import pl.blizinski.googletasksstore.GoogleAccessTokenProvider
+import pl.blizinski.tasksync.model.AccessTokenProvider
 import pl.blizinski.googletasksstore.internal.GoogleTask
 import pl.blizinski.googletasksstore.internal.GoogleTaskList
 import pl.blizinski.tasksync.NetworkSource
@@ -37,7 +37,7 @@ private const val TASKS_API_BASE = "https://www.googleapis.com/tasks/v1"
  */
 @OptIn(ExperimentalTime::class)
 internal class GoogleTasksNetworkSourceWasm(
-    private val tokenProvider: GoogleAccessTokenProvider,
+    private val tokenProvider: AccessTokenProvider,
     private val httpClient: HttpClient = HttpClient {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
